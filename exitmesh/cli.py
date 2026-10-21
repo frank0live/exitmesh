@@ -72,7 +72,7 @@ def cmd_list(args):
     for e in ex:
         h = e["health"]
         state = "disabled" if not e["enabled"] else ("up" if h["ok"] else "down")
-        lat = f"{h['latency_ms']}ms" if h.get("latency_ms") else "-"
+        lat = f"{h['latency_ms']}ms" if h.get("latency_ms") is not None else "-"
         print(f"{e['name'][:17]:<18} {e['kind']:<8} {state:<10} {lat:>7} "
               f"{(h.get('exit_ip') or '-'):<16} "
               f"{fmt_b(e['traffic']['up']):>8} {fmt_b(e['traffic']['down']):>8}  {e['weight']}")

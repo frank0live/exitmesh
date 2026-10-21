@@ -145,7 +145,13 @@ class App:
         if not e:
             return {"ok": False, "error": "no such exit"}
         try:
-            if e["kind"] == "socks5" or (e["kind"] in SUPPORTED and e.get("socks_port")):
+            if e["kind"] == "socks5":
+                host, _, p = (e.get("endpoint") or "").rpartition(":")
+                if not p:
+                    return {"ok": False, "error": "endpoint must be host:port"}
+                r = probe_via_socks(host or "127.0.0.1", int(p),
+                                    timeout=float(self.store.get_setting("health_timeout", "6")))
+            elif e["kind"] in SUPPORTED:
                 port = int(e.get("socks_port") or 0)
                 if not port:
                     return {"ok": False, "error": "no socks port assigned"}
@@ -491,6 +497,7 @@ class Handler(BaseHTTPRequestHandler):
                 "running": self.app.xray.alive(e["id"]) if e["kind"] in SUPPORTED else True,
             })
         ranked = self.app.selector.ranked()
+        live = [r for r in ranked if r["score"] > 0]
         return self.json({
             "ok": True,
             "version": __version__,
@@ -499,7 +506,7 @@ class Handler(BaseHTTPRequestHandler):
                        "connections": self.app.router.conn_count,
                        "sticky": self.app.router.sticky.size()},
             "exits": items,
-            "active_exit": ranked[0]["id"] if ranked else None,
+            "active_exit": live[0]["id"] if live else None,
             "ranking": [{"id": r["id"], "score": r["score"],
                          "latency_ms": r["latency_ms"]} for r in ranked],
             "direct": getattr(self.app, "direct_probe", None),

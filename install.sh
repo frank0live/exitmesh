@@ -7,10 +7,10 @@
 set -uo pipefail
 
 APP="exitmesh"
-PREFIX="/opt/exitmesh"
-STATE="/var/lib/exitmesh"
-CONF="/etc/exitmesh"
-XRAY_DIR="/usr/local/bin/xray-bin"
+PREFIX="${EXITMESH_PREFIX:-/opt/exitmesh}"
+STATE="${EXITMESH_STATE:-/var/lib/exitmesh}"
+CONF="${EXITMESH_CONF:-/etc/exitmesh}"
+XRAY_DIR="${EXITMESH_XRAY_DIR:-/usr/local/bin/xray-bin}"
 REPO="${EXITMESH_REPO:-https://github.com/frank0live/exitmesh.git}"
 BRANCH="${EXITMESH_BRANCH:-main}"
 SVC_PANEL="exitmesh-panel"
@@ -106,15 +106,15 @@ fetch_source() {
     fi
   fi
 
-  cat > "$PREFIX/run-panel.py" <<'PY'
+  cat > "$PREFIX/run-panel.py" <<PY
 #!/usr/bin/env python3
 import os, sys
-sys.path.insert(0, "/opt/exitmesh")
+sys.path.insert(0, "$PREFIX")
 from exitmesh.panel import serve
 
 serve(
-    db_path=os.environ.get("EXITMESH_DB", "/var/lib/exitmesh/exitmesh.db"),
-    xray_bin=os.environ.get("EXITMESH_XRAY", "/usr/local/bin/xray-bin/xray"),
+    db_path=os.environ.get("EXITMESH_DB", "$STATE/exitmesh.db"),
+    xray_bin=os.environ.get("EXITMESH_XRAY", "$XRAY_DIR/xray"),
     listen=os.environ.get("EXITMESH_LISTEN", "127.0.0.1"),
     port=int(os.environ.get("EXITMESH_PORT", "0")) or None,
 )
@@ -162,6 +162,10 @@ ReadWritePaths=$STATE $CONF /tmp
 WantedBy=multi-user.target
 EOF
 
+  if [[ "${EXITMESH_NO_SYSTEMD:-0}" == "1" ]]; then
+    warn "EXITMESH_NO_SYSTEMD=1 — unit written but not enabled"
+    return
+  fi
   systemctl daemon-reload
   systemctl enable --now "$SVC_PANEL" >/dev/null 2>&1
   sleep 2

@@ -33,7 +33,7 @@ def _recv_exact(sock, n):
     return buf
 
 
-def socks5_connect(proxy_host, proxy_port, host, port, timeout=8):
+def socks5_connect(proxy_host, proxy_port, host, port, timeout=8.0):
     """Open a TCP stream to host:port through a SOCKS5 proxy. Returns the socket."""
     s = socket.create_connection((proxy_host, int(proxy_port)), timeout=timeout)
     s.settimeout(timeout)
@@ -71,7 +71,7 @@ def socks5_connect(proxy_host, proxy_port, host, port, timeout=8):
         raise
 
 
-def _http_get(sock, host, path="/", tls=False, timeout=8):
+def _http_get(sock, host, path="/", tls=False, timeout=8.0):
     s = sock
     if tls:
         ctx = ssl.create_default_context()
@@ -146,7 +146,7 @@ def _looks_like_ip(s):
             return False
 
 
-def geo(ip, timeout=6):
+def geo(ip, timeout=6.0):
     """Country lookup. Returns (country_name, country_code) or (None, None)."""
     try:
         s = socket.create_connection(("ip-api.com", 80), timeout=timeout)
@@ -161,7 +161,7 @@ def geo(ip, timeout=6):
     return None, None
 
 
-def probe_via_socks(proxy_host, proxy_port, timeout=8):
+def probe_via_socks(proxy_host, proxy_port, timeout=8.0):
     """Latency + exit IP for a local SOCKS5 listener."""
     t0 = time.time()
     s = socks5_connect(proxy_host, proxy_port, "api.ipify.org", 443, timeout=timeout)
@@ -184,7 +184,7 @@ def probe_via_socks(proxy_host, proxy_port, timeout=8):
             "country": country, "country_code": cc, "error": ""}
 
 
-def probe_direct(timeout=6):
+def probe_direct(timeout=6.0):
     t0 = time.time()
 
     def connect(host, port, tls, path):
@@ -199,7 +199,7 @@ def probe_direct(timeout=6):
             "country": country, "country_code": cc, "error": ""}
 
 
-def probe_tcp(host, port, timeout=4):
+def probe_tcp(host, port, timeout=4.0):
     t0 = time.time()
     try:
         s = socket.create_connection((host, int(port)), timeout=timeout)
