@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ExitMesh — multi-exit proxy fabric</title>
+<style>
+:root{
+  --bg:#080b10; --bg2:#0c1119; --card:#111823; --card2:#151d2a;
+  --line:#1e2937; --line2:#2a3a4d;
+  --txt:#e6edf6; --dim:#8b9bb0; --dim2:#5f7086;
+  --acc:#00d4a0; --acc2:#12b8ff; --warn:#f5a524; --bad:#ff5c72;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--sans);
+  font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:radial-gradient(900px 400px at 15% -10%,#00d4a012,transparent 60%),
+             radial-gradient(700px 380px at 90% 0%,#12b8ff10,transparent 60%)}
+.wrap{position:relative;z-index:1;max-width:1320px;margin:0 auto;padding:18px 20px 40px}
+
+/* ---------------------------------------------------------------- header */
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:14px 18px;border:1px solid var(--line);border-radius:16px;
+  background:linear-gradient(180deg,#101825,#0b1119)}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;letter-spacing:-.2px}
+.logo .mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04140f;font-weight:800;font-size:14px}
+.logo small{font-weight:500;color:var(--dim2);font-size:11px;letter-spacing:.4px;text-transform:uppercase}
+.hdr-sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;
+  padding:5px 10px;border-radius:999px;border:1px solid var(--line2);background:#0b121b;color:var(--dim)}
+.pill b{color:var(--txt);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--dim2);flex:0 0 auto}
+.dot.ok{background:var(--acc);box-shadow:0 0 0 3px #00d4a022}
+.dot.bad{background:var(--bad);box-shadow:0 0 0 3px #ff5c7222}
+.dot.warn{background:var(--warn);box-shadow:0 0 0 3px #f5a52422}
+
+/* --------------------------------------------------------------- buttons */
+button{font-family:inherit;font-size:12.5px;color:var(--txt);background:var(--card2);
+  border:1px solid var(--line2);border-radius:9px;padding:7px 12px;cursor:pointer;
+  transition:.14s;white-space:nowrap}
+button:hover{background:#1b2534;border-color:#3a4d63}
+button.pri{background:linear-gradient(135deg,var(--acc),#00b98d);border:0;color:#04140f;font-weight:700}
+button.pri:hover{filter:brightness(1.08)}
+button.ghost{background:transparent}
+button.danger{color:#ffb4be}
+button.danger:hover{background:#2a0f14;border-color:#7f2231}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.sm{padding:5px 9px;font-size:11.5px;border-radius:7px}
+
+/* ----------------------------------------------------------------- cards */
+.grid{display:grid;gap:14px;margin-top:14px}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g2{grid-template-columns:1.35fr 1fr}
+@media(max-width:1080px){.g4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
+@media(max-width:640px){.g4{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 16px}
+.card h3{font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;
+  color:var(--dim2);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.card h3 .r{margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none;font-size:11px}
+.kpi{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.8px;line-height:1.1}
+.kpi small{font-size:12px;color:var(--dim2);font-weight:500;letter-spacing:0}
+.sub{font-family:var(--mono);font-size:11px;color:var(--dim2);margin-top:5px}
+.bar{height:5px;border-radius:3px;background:#1a2331;overflow:hidden;margin-top:11px}
+.bar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--acc),var(--acc2));
+  transition:width .5s}
+
+/* ---------------------------------------------------------------- table */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--dim2);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:10px;border-bottom:1px solid #161f2b;vertical-align:middle;font-size:13px}
+tr:last-child td{border-bottom:0}
+tbody tr:hover{background:#0e1520}
+.mono{font-family:var(--mono)}
+.tag{display:inline-block;font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:5px;
+  background:#0f1a26;border:1px solid var(--line2);color:var(--dim);text-transform:uppercase;letter-spacing:.4px}
+.tag.vless{color:#a78bfa;border-color:#3b2f63}
+.tag.vmess{color:#60a5fa;border-color:#243d63}
+.tag.trojan{color:#f472b6;border-color:#5c2743}
+.tag.ss{color:#34d399;border-color:#1c4f3e}
+.tag.socks5{color:#fbbf24;border-color:#5c4620}
+.tag.direct{color:#94a3b8}
+.name{font-weight:600;font-size:13px}
+.name small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--dim2);font-weight:400;margin-top:1px}
+.score{font-family:var(--mono);font-size:11.5px;color:var(--acc)}
+.acts{display:flex;gap:5px;flex-wrap:wrap}
+.flag{font-size:14px;margin-right:5px}
+
+/* --------------------------------------------------------------- ranking */
+.rank{display:flex;flex-direction:column;gap:7px}
+.rk{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;
+  background:#0d141d;border:1px solid var(--line)}
+.rk.top{border-color:#1f5c4a;background:linear-gradient(90deg,#0d1f1a,#0d141d)}
+.rk .n{font-family:var(--mono);font-size:10px;color:var(--dim2);width:14px}
+.rk .nm{font-size:12.5px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rk .sc{font-family:var(--mono);font-size:11px;color:var(--acc)}
+
+/* ---------------------------------------------------------------- misc */
+pre{background:#060a0f;border:1px solid var(--line);border-radius:10px;padding:11px;
+  font-family:var(--mono);font-size:11px;line-height:1.65;color:#93a5bb;
+  overflow:auto;max-height:230px;white-space:pre-wrap;word-break:break-all}
+.field{margin-bottom:11px}
+.field label{display:block;font-size:11px;color:var(--dim2);margin-bottom:5px;
+  letter-spacing:.3px;text-transform:uppercase;font-weight:600}
+input,select,textarea{width:100%;background:#0a1017;border:1px solid var(--line2);
+  border-radius:9px;color:var(--txt);padding:9px 11px;font-family:var(--mono);font-size:12.5px;
+  outline:none;transition:.14s}
+input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px #00d4a015}
+textarea{resize:vertical;min-height:76px}
+.row{display:flex;gap:10px}
+.row>*{flex:1}
+.empty{text-align:center;padding:26px 10px;color:var(--dim2);font-size:12.5px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:#132030;border:1px solid var(--line2);border-radius:11px;padding:11px 18px;
+  font-size:12.5px;box-shadow:0 12px 40px #0008;opacity:0;transition:.28s;z-index:99;max-width:90vw}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast.ok{border-color:#1f5c4a;color:#7ff0cf}
+.toast.bad{border-color:#7f2231;color:#ffb4be}
+
+/* ---------------------------------------------------------------- login */
+#login{position:fixed;inset:0;z-index:80;display:grid;place-items:center;
+  background:#05080ce8;backdrop-filter:blur(8px)}
+#login .box{width:min(370px,92vw);background:var(--card);border:1px solid var(--line2);
+  border-radius:18px;padding:26px}
+#login h1{font-size:19px;margin-bottom:5px;letter-spacing:-.3px}
+#login p{font-size:12px;color:var(--dim2);margin-bottom:20px}
+.hidden{display:none!important}
+.banner{display:flex;align-items:center;gap:9px;padding:9px 13px;border-radius:10px;
+  background:#2a1f08;border:1px solid #5c4620;color:#fbbf24;font-size:12px;margin-bottom:12px}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="box">
+    <h1>ExitMesh</h1>
+    <p>Multi-exit proxy fabric · sign in to continue</p>
+    <div class="field">
+      <label>Admin password</label>
+      <input id="pw" type="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="pri" style="width:100%;padding:10px" onclick="doLogin()">Sign in</button>
+    <div id="lerr" class="sub" style="color:#ffb4be;margin-top:11px"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <header>
+    <div class="logo"><div class="mark">EM</div>
+      <div>ExitMesh<br><small>multi-exit proxy fabric</small></div>
+    </div>
+    <div class="hdr-sp"></div>
+    <span class="pill" id="p-route"><span class="dot ok"></span>router <b>—</b></span>
+    <span class="pill" id="p-active"><span class="dot"></span>active <b>—</b></span>
+    <span class="pill" id="p-ver">v—</span>
+    <button class="ghost sm" onclick="loadAll()">↻ Refresh</button>
+    <button class="ghost sm" onclick="logout()">Sign out</button>
+  </header>
+
+  <div class="grid g4">
+    <div class="card">
+      <h3>Exits <span class="r" id="k-exits-r"></span></h3>
+      <div class="kpi" id="k-exits">—</div>
+      <div class="sub" id="k-exits-s">healthy / total</div>
+      <div class="bar"><i id="k-exits-b" style="width:0"></i></div>
+    </div>
+    <div class="card">
+      <h3>Throughput</h3>
+      <div class="kpi" id="k-bytes">—</div>
+      <div class="sub" id="k-bytes-s">total up + down</div>
+      <div class="bar"><i id="k-bytes-b" style="width:0"></i></div>
+    </div>
+    <div class="card">
+      <h3>Connections</h3>
+      <div class="kpi" id="k-conns">—</div>
+      <div class="sub" id="k-conns-s">sticky sessions</div>
+      <div class="bar"><i id="k-conns-b" style="width:0"></i></div>
+    </div>
+    <div class="card">
+      <h3>Direct egress <span class="r" id="k-dir-r"></span></h3>
+      <div class="kpi mono" id="k-dir">—</div>
+      <div class="sub" id="k-dir-s">server's own IP</div>
+      <div class="bar"><i id="k-dir-b" style="width:0"></i></div>
+    </div>
+  </div>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3>Exit ranking <span class="r">health-weighted</span></h3>
+      <div class="rank" id="ranking"><div class="empty">No exits yet — add one below.</div></div>
+    </div>
+    <div class="card">
+      <h3>Add exit <span class="r">share link or host:port</span></h3>
+      <div class="field"><label>Name</label>
+        <input id="a-name" placeholder="frankfurt-1"></div>
+      <div class="field"><label>Share link (vless / vmess / trojan / ss)</label>
+        <textarea id="a-link" placeholder="vless://uuid@host:443?type=tcp&security=reality&...#name"></textarea></div>
+      <div class="field"><label>— or — SOCKS5 endpoint</label>
+        <input id="a-endpoint" placeholder="10.0.0.5:1080"></div>
+      <div class="row">
+        <div class="field"><label>Weight</label><input id="a-weight" type="number" value="100" min="1" max="1000"></div>
+        <div class="field" style="display:flex;align-items:flex-end">
+          <button class="pri" style="width:100%" onclick="addExit()">+ Add exit</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h3>Exits <span class="r"><button class="sm" onclick="probeAll()">⚡ Probe all</button></span></h3>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Exit</th><th>Type</th><th>Status</th><th>Exit IP</th>
+          <th>Latency</th><th>Score</th><th>Traffic</th><th>Weight</th><th></th>
+        </tr></thead>
+        <tbody id="exits"><tr><td colspan="9"><div class="empty">Loading…</div></td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card">
+      <h3>Routing rules <span class="r">first match wins · JSON</span></h3>
+      <div class="field">
+        <textarea id="rules-json" style="min-height:158px"></textarea>
+      </div>
+      <div class="row" style="align-items:center">
+        <button class="pri" onclick="saveRules()">Save rules</button>
+        <span class="sub" style="margin:0">match: domain · port · client · default</span>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Audit log <span class="r">last 40 events</span></h3>
+      <pre id="audit" style="max-height:236px">—</pre>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let STATE = null;
+
+function toast(msg, kind){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + (kind || '');
+  clearTimeout(t._t);
+  t._t = setTimeout(()=>t.className='toast '+(kind||''), 3200);
+}
+
+async function api(path, opts){
+  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}}, opts||{}));
+  if (r.status === 401){ document.getElementById('login').classList.remove('hidden'); throw new Error('unauthorized'); }
+  return r.json();
+}
+
+async function doLogin(){
+  const pw = document.getElementById('pw').value;
+  const err = document.getElementById('lerr');
+  err.textContent = '';
+  const r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})});
+  const j = await r.json();
+  if (j.ok){ document.getElementById('login').classList.add('hidden'); loadAll(); }
+  else err.textContent = j.error || 'login failed';
+}
+
+async function logout(){
+  await api('/api/logout', {method:'POST'});
+  document.getElementById('login').classList.remove('hidden');
+}
+
+function fmtBytes(n){
+  if (!n) return '0 B';
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0; while (n >= 1024 && i < u.length-1){ n /= 1024; i++; }
+  return n.toFixed(n < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+}
+function fmtAgo(ts){
+  if (!ts) return 'never';
+  const d = Math.floor(Date.now()/1000) - ts;
+  if (d < 60) return d + 's ago';
+  if (d < 3600) return Math.floor(d/60) + 'm ago';
+  if (d < 86400) return Math.floor(d/3600) + 'h ago';
+  return Math.floor(d/86400) + 'd ago';
+}
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function loadAll(){
+  try {
+    const [st, rules, audit] = await Promise.all([
+      api('/api/status'), api('/api/rules'), api('/api/audit?limit=40')
+    ]);
+    STATE = st;
+    render(st);
+    const rj = document.getElementById('rules-json');
+    if (document.activeElement !== rj && !rj.dataset.dirty) {
+      rj.value = JSON.stringify(rules.rules || [], null, 2);
+    }
+    document.getElementById('audit').textContent = (audit.items || [])
+      .map(a => new Date(a.ts*1000).toISOString().slice(5,19).replace('T',' ') + '  ' +
+                String(a.action).padEnd(14) + '  ' + (a.detail || '')).join('\n') || '—';
+  } catch(e){ if (e.message !== 'unauthorized') toast('load failed: '+e.message, 'bad'); }
+}
+
+function render(d){
+  const ex = d.exits || [];
+  const healthy = ex.filter(e => e.health.ok && e.enabled).length;
+  const total = ex.length;
+  const up = ex.reduce((s,e)=>s+e.traffic.up,0);
+  const down = ex.reduce((s,e)=>s+e.traffic.down,0);
+  const conns = ex.reduce((s,e)=>s+e.traffic.conns,0);
+
+  document.getElementById('k-exits').textContent = healthy + ' / ' + total;
+  document.getElementById('k-exits-s').textContent = total ? 'healthy exits' : 'no exits configured';
+  document.getElementById('k-exits-b').style.width = total ? (healthy/total*100)+'%' : '0';
+  document.getElementById('k-bytes').textContent = fmtBytes(up+down);
+  document.getElementById('k-bytes-s').textContent = '↑ ' + fmtBytes(up) + '   ↓ ' + fmtBytes(down);
+  document.getElementById('k-bytes-b').style.width = Math.min(100, (up+down)/1073741824*100)+'%';
+  document.getElementById('k-conns').textContent = conns.toLocaleString();
+  document.getElementById('k-conns-s').textContent = (d.router.sticky||0) + ' sticky · ' + (d.router.connections||0).toLocaleString() + ' handled';
+
+  const dr = d.direct;
+  document.getElementById('k-dir').textContent = dr && dr.exit_ip ? dr.exit_ip : '—';
+  document.getElementById('k-dir-s').textContent = dr && dr.country ? dr.country + ' · ' + (dr.latency_ms||'?') + ' ms' : 'not probed yet';
+  document.getElementById('k-dir-r').textContent = dr && dr.exit_ip ? '' : '';
+
+  document.getElementById('p-route').innerHTML = '<span class="dot ok"></span>router <b>' +
+    esc(d.router.listen) + ':' + d.router.port + '</b>';
+  const act = ex.find(e => e.id === d.active_exit);
+  document.getElementById('p-active').innerHTML = '<span class="dot ' + (act ? 'ok' : 'bad') + '"></span>active <b>' +
+    esc(act ? act.name : 'none') + '</b>';
+  document.getElementById('p-ver').textContent = 'v' + d.version;
+
+  // ranking
+  const rk = document.getElementById('ranking');
+  const byId = {}; ex.forEach(e => byId[e.id] = e);
+  if (!d.ranking || !d.ranking.length){
+    rk.innerHTML = '<div class="empty">No exits yet — add one on the right.</div>';
+  } else {
+    rk.innerHTML = d.ranking.map((r,i)=>{
+      const e = byId[r.id] || {};
+      return '<div class="rk ' + (i===0?'top':'') + '">' +
+        '<span class="n">' + (i+1) + '</span>' +
+        '<span class="nm">' + esc(e.name || r.id) + '</span>' +
+        '<span class="sc">' + (r.latency_ms ? r.latency_ms + 'ms' : '—') + '</span>' +
+        '<span class="sc" style="color:var(--acc2)">' + r.score + '</span></div>';
+    }).join('');
+  }
+
+  // table
+  const tb = document.getElementById('exits');
+  if (!ex.length){
+    tb.innerHTML = '<tr><td colspan="9"><div class="empty">No exits. Add a share link above to get started.</div></td></tr>';
+    return;
+  }
+  tb.innerHTML = ex.map(e => {
+    const h = e.health || {};
+    const st = !e.enabled ? ['warn','disabled'] :
+               (h.ok ? ['ok','healthy'] : (h.error ? ['bad','error'] : ['warn','unprobed']));
+    const lat = h.latency_ms ? h.latency_ms + ' ms' : '—';
+    const ip = h.exit_ip || '—';
+    const tr = e.traffic || {};
+    return '<tr>' +
+      '<td><div class="name">' + esc(e.name) + '<small>' + esc(e.endpoint || (e.socks_port ? '127.0.0.1:'+e.socks_port : '')) + '</small></div></td>' +
+      '<td><span class="tag ' + esc(e.kind) + '">' + esc(e.kind) + '</span></td>' +
+      '<td><span class="dot ' + st[0] + '"></span> <span style="font-size:12px;color:var(--dim)">' + st[1] +
+        (h.ts ? ' · ' + fmtAgo(h.ts) : '') + '</span>' +
+        (h.error ? '<div class="mono" style="font-size:10px;color:#8b5560;margin-top:2px">' + esc(h.error.slice(0,42)) + '</div>' : '') + '</td>' +
+      '<td class="mono" style="font-size:11.5px">' + esc(ip) + '</td>' +
+      '<td class="mono" style="font-size:11.5px">' + lat + '</td>' +
+      '<td class="score">' + (e.score || (STATE.ranking.find(r=>r.id===e.id)||{}).score || '—') + '</td>' +
+      '<td class="mono" style="font-size:11px;color:var(--dim)">↑' + fmtBytes(tr.up) + '<br>↓' + fmtBytes(tr.down) + '</td>' +
+      '<td><input type="number" value="' + (e.weight||100) + '" min="1" max="1000" style="width:62px;padding:4px 6px;font-size:11px" ' +
+        'onchange="setWeight(\'' + e.id + '\', this.value)"></td>' +
+      '<td><div class="acts">' +
+        '<button class="sm" onclick="probe(\'' + e.id + '\')" title="Probe">⚡</button>' +
+        '<button class="sm" onclick="act(\'' + e.id + '\',\'toggle\')" title="Toggle">' + (e.enabled?'⏸':'▶') + '</button>' +
+        (['vless','vmess','trojan','ss'].includes(e.kind) ?
+          '<button class="sm" onclick="act(\'' + e.id + '\',\'restart\')" title="Restart">↻</button>' : '') +
+        '<button class="sm danger" onclick="delExit(\'' + e.id + '\')" title="Delete">✕</button>' +
+      '</div></td></tr>';
+  }).join('');
+}
+
+async function addExit(){
+  const name = document.getElementById('a-name').value.trim();
+  const link = document.getElementById('a-link').value.trim();
+  const endpoint = document.getElementById('a-endpoint').value.trim();
+  const weight = parseInt(document.getElementById('a-weight').value || '100');
+  if (!name) return toast('name is required', 'bad');
+  if (!link && !endpoint) return toast('share link or endpoint required', 'bad');
+  const j = await api('/api/exits', {method:'POST', body: JSON.stringify({name, link, endpoint, weight})});
+  if (j.ok){
+    toast('exit added', 'ok');
+    document.getElementById('a-name').value = '';
+    document.getElementById('a-link').value = '';
+    document.getElementById('a-endpoint').value = '';
+    loadAll();
+  } else toast(j.error || 'failed', 'bad');
+}
+
+async function delExit(id){
+  if (!confirm('Delete exit "' + id + '"?')) return;
+  const j = await api('/api/exits/' + id, {method:'DELETE'});
+  if (j.ok){ toast('deleted', 'ok'); loadAll(); } else toast(j.error, 'bad');
+}
+
+async function act(id, action){
+  const j = await api('/api/exits/' + id + '/' + action, {method:'POST', body:'{}'});
+  if (j.ok){ loadAll(); } else toast(j.error || 'failed', 'bad');
+}
+
+async function probe(id){
+  toast('probing ' + id + '…');
+  const j = await api('/api/exits/' + id + '/probe', {method:'POST', body:'{}'});
+  if (j.ok){
+    const r = j.result;
+    toast(r.ok ? id + ': ' + r.latency_ms + 'ms · ' + (r.exit_ip||'') + ' ' + (r.country||'')
+               : id + ': ' + (r.error||'failed'), r.ok ? 'ok' : 'bad');
+    loadAll();
+  }
+}
+
+async function probeAll(){
+  toast('probing all exits…');
+  const j = await api('/api/probe', {method:'POST', body:'{}'});
+  if (j.ok){
+    const n = Object.values(j.results).filter(r=>r.ok).length;
+    toast(n + ' / ' + Object.keys(j.results).length + ' healthy', n ? 'ok' : 'bad');
+    loadAll();
+  }
+}
+
+async function setWeight(id, w){
+  await api('/api/exits/' + id + '/weight', {method:'POST', body: JSON.stringify({weight: parseInt(w)})});
+  loadAll();
+}
+
+async function saveRules(){
+  let rules;
+  try { rules = JSON.parse(document.getElementById('rules-json').value); }
+  catch(e){ return toast('invalid JSON: ' + e.message, 'bad'); }
+  const j = await api('/api/rules', {method:'POST', body: JSON.stringify({rules})});
+  toast(j.ok ? 'rules saved' : (j.error||'failed'), j.ok ? 'ok' : 'bad');
+  if (j.ok){ delete document.getElementById('rules-json').dataset.dirty; loadAll(); }
+}
+
+const rjEl = document.getElementById('rules-json');
+rjEl.addEventListener('input', () => { rjEl.dataset.dirty = '1'; });
+
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+fetch('/api/health').then(r=>r.json()).then(()=>{ loadAll().catch(()=>{}); });
+setInterval(()=>{ if (STATE) loadAll(); }, 5000);
+</script>
+</body>
+</html>

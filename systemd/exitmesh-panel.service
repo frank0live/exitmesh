@@ -1,0 +1,24 @@
+[Unit]
+Description=ExitMesh panel and SOCKS router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=EXITMESH_DB=/var/lib/exitmesh/exitmesh.db
+Environment=EXITMESH_XRAY=/usr/local/bin/xray-bin/xray
+Environment=EXITMESH_LISTEN=127.0.0.1
+Environment=EXITMESH_PORT=8099
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/exitmesh/run-panel.py
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/exitmesh /etc/exitmesh /tmp
+
+[Install]
+WantedBy=multi-user.target

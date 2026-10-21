@@ -1,0 +1,22 @@
+[project]
+name = "exitmesh"
+version = "1.0.0"
+description = "Multi-exit SOCKS5 proxy fabric with health-ranked selection, sticky sessions and a web panel"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "frank0live"}]
+keywords = ["proxy", "socks5", "xray", "vless", "failover", "load-balancer"]
+
+[project.scripts]
+exitmesh = "exitmesh.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/frank0live/exitmesh"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["exitmesh"]
