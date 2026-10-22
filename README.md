@@ -233,9 +233,11 @@ failover when the top-ranked exit is dead), and a regression suite for the secur
 - `_is_https()` is true for `X-Forwarded-Proto: https`, false for plain HTTP
 - the startup path writes the password to a 0600 file and logs no secret
 - `web/index.html` contains no `onclick=` built from `e.id`
+- the generated xray config blackholes RFC1918, loopback, link-local (cloud
+  metadata), CGNAT and IPv6 ULA/link-local ranges on the `direct` fallback
 
 ```
-24 passed, 0 failed
+25 passed, 0 failed
 ```
 
 `tests/exploit_check.py` goes further: it boots a real panel and *runs the attacks* —

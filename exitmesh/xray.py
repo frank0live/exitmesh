@@ -249,7 +249,18 @@ def build_config(parsed, socks_port, listen="127.0.0.1", log_level="warning"):
             {"tag": "direct", "protocol": "freedom"},
             {"tag": "block", "protocol": "blackhole"},
         ],
-        "routing": {"domainStrategy": "AsIs", "rules": []},
+        "routing": {"domainStrategy": "AsIs", "rules": [
+            # The fallback 'direct' outbound would otherwise let anyone who can
+            # reach this per-exit SOCKS port pivot into the host's own network:
+            # RFC1918 ranges, loopback, link-local (including the
+            # 169.254.169.254 cloud metadata endpoint) and CGNAT. Nothing
+            # ExitMesh is for needs to reach those, so they are blackholed.
+            {"type": "field", "outboundTag": "block", "ip": [
+                "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10",
+                "::1/128", "fc00::/7", "fe80::/10",
+            ]},
+        ]},
     }
 
 

@@ -118,6 +118,30 @@ def test_web_has_no_onclick_with_exit_id():
     assert "data-eid=" in html
 
 
+def test_private_ranges_are_blackholed():
+    """The 'direct' fallback must not reach LAN/loopback/metadata addresses."""
+    from exitmesh.xray import build_config, parse_link
+    link = ("vless://11111111-2222-3333-4444-555555555555@example.com:443"
+            "?type=tcp&security=tls#t")
+    cfg = build_config(parse_link(link), 20199)
+    rules = cfg["routing"]["rules"]
+    assert rules, "no routing rules: the direct outbound is unrestricted"
+    blocked = set()
+    for r in rules:
+        if r.get("outboundTag") == "block":
+            blocked.update(r.get("ip") or [])
+    for net in ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                "127.0.0.0/8", "169.254.0.0/16", "100.64.0.0/10",
+                "::1/128", "fc00::/7", "fe80::/10"]:
+        assert net in blocked, "missing block rule for %s" % net
+    # and the block rule must not be shadowed by an earlier catch-all
+    for r in rules:
+        if r is rules[-1] or r.get("outboundTag") == "block":
+            continue
+        assert not (r.get("network") and not r.get("ip") and not r.get("domain")), \
+            "a catch-all rule precedes the private-range block"
+
+
 def test_installer_verifies_checksum():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sh = open(os.path.join(here, "install.sh")).read()
