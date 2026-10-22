@@ -265,7 +265,18 @@ class XraySupervisor:
         os.makedirs(conf_dir, exist_ok=True)
 
     def conf_path(self, eid):
-        return os.path.join(self.conf_dir, f"{eid}.json")
+        # The id reaches here from the database, which may predate the
+        # sanitisation in store.safe_exit_id. Refuse anything that is not a
+        # single plain filename component so a stale row can never escape the
+        # config directory.
+        eid = str(eid)
+        if not eid or eid in (".", "..") or os.sep in eid or "/" in eid or "\\" in eid:
+            raise ValueError(f"refusing unsafe exit id: {eid!r}")
+        path = os.path.join(self.conf_dir, f"{eid}.json")
+        base = os.path.realpath(self.conf_dir)
+        if os.path.commonpath([base, os.path.realpath(os.path.dirname(path))]) != base:
+            raise ValueError(f"refusing path outside config dir: {eid!r}")
+        return path
 
     def write_config(self, eid, parsed, socks_port):
         cfg = build_config(parsed, socks_port)

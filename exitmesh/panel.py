@@ -300,6 +300,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
+    def _is_https(self):
+        """True when this request reached us over TLS (directly or via proxy)."""
+        if getattr(self, "socket", None) is not None:
+            try:
+                import ssl as _ssl
+                if isinstance(self.socket, _ssl.SSLSocket):
+                    return True
+            except Exception:
+                pass
+        proto = (self.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        if proto == "https":
+            return True
+        return (self.headers.get("X-Forwarded-Ssl") or "").lower() == "on"
+
     def _send(self, code, body=b"", ctype="application/json; charset=utf-8",
               extra=None):
         if isinstance(body, str):
@@ -312,6 +326,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Cache-Control", "no-store")
         for k, v in (extra or {}).items():
+            # A session cookie without Secure travels in cleartext on any plain
+            # HTTP hop. Add the flag whenever the request itself arrived over
+            # TLS or through a TLS-terminating proxy, so the cookie is only
+            # ever sent back over an encrypted channel.
+            if k.lower() == "set-cookie" and "secure" not in v.lower() and self._is_https():
+                v = v + "; Secure"
             self.send_header(k, v)
         self.end_headers()
         if body and self.command != "HEAD":
@@ -615,6 +635,17 @@ class Handler(BaseHTTPRequestHandler):
         b = self.body_json()
         allowed = {"sticky_ttl", "health_interval", "health_timeout",
                    "unhealthy_after", "router_listen", "router_socks_port"}
+        # Binding the unauthenticated SOCKS router to a non-loopback address
+        # turns this box into an open proxy. The listener refuses it too, but
+        # rejecting it here means the operator gets a clear error at save time
+        # instead of a router that silently fails to start.
+        if "router_listen" in b:
+            from .socks import allow_public_listen, is_loopback
+            if not is_loopback(b["router_listen"]) and not allow_public_listen():
+                return self.err(
+                    400,
+                    "router_listen must stay on loopback; set "
+                    "EXITMESH_ALLOW_PUBLIC_SOCKS=1 and firewall the port to override")
         changed = {}
         for k, v in b.items():
             if k in allowed:
@@ -636,9 +667,29 @@ def serve(db_path, xray_bin="/usr/local/bin/xray", listen="127.0.0.1", port=None
         app.port = int(port)
 
     if not app.has_password():
-        pw = os.environ.get("EXITMESH_PASSWORD") or secrets.token_urlsafe(12)
-        app.set_password(pw)
-        print(f"[exitmesh] initial admin password: {pw}", flush=True)
+        # The generated password used to be printed here, which put it in the
+        # journal (readable by anything in the adm/systemd-journal groups and
+        # often shipped off-box by log collectors). When the operator did not
+        # supply one, write it to a 0600 file and log only the path.
+        env_pw = os.environ.get("EXITMESH_PASSWORD")
+        if env_pw:
+            app.set_password(env_pw)
+            print("[exitmesh] initial admin password set from EXITMESH_PASSWORD", flush=True)
+        else:
+            pw = secrets.token_urlsafe(18)
+            app.set_password(pw)
+            pw_file = os.environ.get("EXITMESH_PASSWORD_FILE", "/etc/exitmesh/initial-password")
+            try:
+                os.makedirs(os.path.dirname(pw_file), mode=0o700, exist_ok=True)
+                fd = os.open(pw_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as fh:
+                    fh.write(pw + "\n")
+                print(f"[exitmesh] initial admin password written to {pw_file} (mode 0600) — "
+                      "read it, then delete the file", flush=True)
+            except OSError as exc:
+                # Never fall back to logging the secret.
+                print(f"[exitmesh] could not write {pw_file} ({exc}); set EXITMESH_PASSWORD "
+                      "and restart to set the initial password", flush=True)
 
     Handler.app = app
     httpd = ThreadingHTTPServer((listen, app.port), Handler)

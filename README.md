@@ -74,14 +74,33 @@ into SQLite every few seconds — no write per packet.
 
 ## Install
 
+Download the installer, read it, then run it — do not pipe a remote file straight
+into a root shell:
+
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/frank0live/exitmesh/main/install.sh)
+curl -fsSLO https://raw.githubusercontent.com/frank0live/exitmesh/main/install.sh
+less install.sh          # read it
+sudo bash install.sh
 ```
 
 The installer is idempotent and does four things: installs Python if missing, fetches
-`xray-core` for your architecture (skipped if present), copies the app to `/opt/exitmesh`,
-and writes a hardened systemd unit. It prints the panel URL and the generated admin password
-at the end.
+`xray-core` for your architecture (skipped if present, and **verified against the
+SHA2-256 checksum published with the release**), copies the app to `/opt/exitmesh`,
+and writes a hardened systemd unit.
+
+It runs the panel as an unprivileged `exitmesh` user with `ProtectSystem=strict`,
+`NoNewPrivileges`, `PrivateDevices` and a restricted address-family/syscall surface.
+
+At the end it prints the panel URL. The panel binds `127.0.0.1` by default, so reach
+it through an SSH tunnel rather than exposing it:
+
+```bash
+ssh -N -L 8099:127.0.0.1:8099 root@your-server
+# then open http://127.0.0.1:8099
+```
+
+The generated admin password is written to `/etc/exitmesh/initial-password` (mode
+0600) instead of being printed to the journal — read it, then delete the file.
 
 Non-interactive:
 
@@ -159,11 +178,42 @@ an exit id, `auto` (ranked selection), `direct` (server's own IP) or `block`.
 
 - Panel binds to `127.0.0.1` by default; passwords are PBKDF2-SHA256 (200k rounds).
 - Sessions are HMAC-signed cookies — no server-side session table to leak or grow.
+  The cookie is `HttpOnly`, `SameSite=Strict`, and gains `Secure` automatically when
+  the request arrives over TLS (directly or via a TLS-terminating proxy).
 - Login is rate-limited: 5 failures per IP per 5 minutes.
+- Exit ids are derived through `store.safe_exit_id()`: only `[a-z0-9._-]` survives,
+  `..` is collapsed, and `xray.conf_path()` independently refuses any id that is not a
+  single plain filename inside the config dir. A name like `../../x` cannot write
+  outside `/etc/exitmesh/xray/`.
+- Exit names reach the DOM only through `esc()` / `dataset`; there are no inline
+  `onclick` handlers built by string concatenation, so a name containing a quote
+  cannot execute script.
 - Xray configs are written `0600` to `/etc/exitmesh/xray/`.
-- The systemd unit runs with `NoNewPrivileges`, `PrivateTmp` and a restricted
-  `ReadWritePaths` set.
-- **The SOCKS5 router itself is unauthenticated.** Keep it on loopback.
+- The panel runs as an unprivileged `exitmesh` user, not root, with
+  `ProtectSystem=strict`, `ProtectHome`, `NoNewPrivileges`, `PrivateTmp`,
+  `PrivateDevices`, `RestrictSUIDSGID`, `RestrictNamespaces`, `LockPersonality` and
+  `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`.
+- The xray archive is verified against the `SHA2-256` value in the release's `.dgst`
+  file before it is installed; a missing checksum or a mismatch aborts the install.
+- The initial admin password is written to `/etc/exitmesh/initial-password` (mode
+  `0600`) and never printed to the journal or to a non-interactive stdout.
+- **The SOCKS5 router itself is unauthenticated.** It refuses to bind a non-loopback
+  address unless `EXITMESH_ALLOW_PUBLIC_SOCKS=1` is set explicitly; the panel rejects
+  such a `router_listen` with a 400 before it is saved. If you do override it, the
+  `direct` exit exposes the server's own network to whoever can reach that port —
+  firewall it and put auth in front of it.
+
+### Threat model
+
+Everything except the unauthenticated SOCKS listener requires an authenticated admin
+session. The threat that matters is therefore *panel compromise* or *admin
+misconfiguration*: that is why the listener is constrained, the process is
+unprivileged, and ids are validated at both the write and the filename layer.
+
+**If you expose the panel beyond loopback, terminate TLS in front of it.** The panel
+speaks plain HTTP; on a raw public port the admin password and session cookie travel
+in cleartext. Use an SSH tunnel (`ssh -N -L 8099:127.0.0.1:8099`) or a reverse proxy
+with a certificate, and send `X-Forwarded-Proto: https` so the cookie gets `Secure`.
 
 ## Tests
 
@@ -171,13 +221,32 @@ an exit id, `auto` (ranked selection), `direct` (server's own IP) or `block`.
 python3 tests/test_exitmesh.py
 ```
 
-14 tests, no network required: link parsing for all four protocols, Xray config shape,
-store CRUD and traffic aggregation, ranking order, rule matching and blocking, breaker
-open/recover, and two live end-to-end router tests (byte-accurate echo through a real
-SOCKS5 fixture, plus failover when the top-ranked exit is dead).
+No network required: link parsing for all four protocols, Xray config shape, store CRUD
+and traffic aggregation, ranking order, rule matching and blocking, breaker open/recover,
+two live end-to-end router tests (byte-accurate echo through a real SOCKS5 fixture, plus
+failover when the top-ranked exit is dead), and a regression suite for the security fixes:
+
+- `safe_exit_id` rejects `../../x`, absolute paths, separators and dot-only ids
+- `xray.conf_path()` raises for a traversal id that was already in the database
+- the panel rejects a non-loopback `router_listen` with 400
+- the SOCKS listener refuses a public bind without the explicit env override
+- `_is_https()` is true for `X-Forwarded-Proto: https`, false for plain HTTP
+- the startup path writes the password to a 0600 file and logs no secret
+- `web/index.html` contains no `onclick=` built from `e.id`
 
 ```
-14 passed, 0 failed
+24 passed, 0 failed
+```
+
+`tests/exploit_check.py` goes further: it boots a real panel and *runs the attacks* —
+creates an exit named `../../pwned` and checks nothing was written outside the config
+dir, stores a name containing `'); alert(...)` and inspects the served HTML and rendered
+DOM, POSTs `router_listen: 0.0.0.0` and expects 400, checks the cookie gains `Secure`
+behind `X-Forwarded-Proto: https`, and asserts the generated password never appears on
+stdout.
+
+```bash
+python3 tests/exploit_check.py
 ```
 
 ## Uninstall

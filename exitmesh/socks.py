@@ -10,11 +10,36 @@ Features that make this more than a port-forwarder:
 import asyncio
 import hashlib
 import ipaddress
+import os
 import socket
 import struct
 import time
 
 SOCKS_VERSION = 5
+
+
+def is_loopback(host):
+    """True when `host` only accepts local connections.
+
+    An empty host is NOT loopback: asyncio.start_server(host="") binds every
+    interface, so treating it as safe would let a blank router_listen open the
+    proxy. Unknown hostnames are not loopback either — only an explicit
+    loopback address or "localhost" is.
+    """
+    h = str(host or "").strip()
+    if not h:
+        return False
+    if h.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def allow_public_listen():
+    """Explicit opt-in for binding the unauthenticated router publicly."""
+    return os.environ.get("EXITMESH_ALLOW_PUBLIC_SOCKS", "").strip() in ("1", "true", "yes")
 
 AUTH_NONE = 0x00
 AUTH_NO_ACCEPTABLE = 0xFF
@@ -175,6 +200,15 @@ class Router:
         self.conn_count = 0
 
     async def start(self):
+        # An unauthenticated SOCKS5 listener bound to a public address is an
+        # open proxy, and the 'direct' exit would expose the server's own
+        # network through it. Binding beyond loopback is therefore opt-in via
+        # an explicit environment flag, never via the panel setting alone.
+        if not is_loopback(self.listen) and not allow_public_listen():
+            raise RuntimeError(
+                f"refusing to bind the unauthenticated SOCKS router to {self.listen}: "
+                "set EXITMESH_ALLOW_PUBLIC_SOCKS=1 to override, and firewall it"
+            )
         self.server = await asyncio.start_server(
             self.handle, self.listen, self.port, backlog=512
         )

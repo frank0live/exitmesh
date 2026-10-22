@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ExitMesh installer — one file, idempotent, systemd-native.
 #
-#   bash <(curl -Ls https://raw.githubusercontent.com/frank0live/exitmesh/main/install.sh)
+#   curl -fsSLO https://raw.githubusercontent.com/frank0live/exitmesh/main/install.sh
+#   less install.sh && bash install.sh          # read before running as root
 #
 # Sub-commands:  install | update | uninstall | status | panel-url | set-password
 set -uo pipefail
@@ -68,6 +69,28 @@ ensure_xray() {
   if ! curl -fsSL --retry 3 -o "$tmp/x.zip" "$url"; then
     rm -rf "$tmp"; die "download failed: $url"
   fi
+
+  # Verify the archive against the checksum published by the release itself.
+  # Without this, a hijacked DNS/TLS path or a tampered release asset installs
+  # an arbitrary root-owned binary. The .dgst file ships next to the zip in the
+  # same release; compare its SHA2-256 line to the file we actually downloaded.
+  step "verifying xray checksum"
+  if ! curl -fsSL --retry 3 -o "$tmp/x.zip.dgst" "$url.dgst"; then
+    rm -rf "$tmp"; die "could not fetch $url.dgst — refusing to install an unverified binary"
+  fi
+  want=$(sed -n 's/^SHA2-256=[[:space:]]*//p' "$tmp/x.zip.dgst" | head -1 | tr -d '[:space:]')
+  [[ -n "$want" ]] || { rm -rf "$tmp"; die "no SHA2-256 in checksum file — refusing to install"; }
+  if command -v sha256sum >/dev/null; then
+    got=$(sha256sum "$tmp/x.zip" | awk '{print $1}')
+  else
+    got=$(shasum -a 256 "$tmp/x.zip" | awk '{print $1}')
+  fi
+  [[ "$got" == "$want" ]] || {
+    rm -rf "$tmp"
+    die "checksum mismatch for $url (expected $want, got $got) — refusing to install"
+  }
+  ok "checksum verified (${want:0:16}…)"
+
   if command -v unzip >/dev/null; then unzip -qo "$tmp/x.zip" -d "$tmp"
   else python3 -c "import zipfile,sys;zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$tmp/x.zip" "$tmp"
   fi
@@ -135,6 +158,25 @@ write_units() {
   local port="${PANEL_PORT:-8099}"
   local listen="${PANEL_LISTEN:-127.0.0.1}"
 
+  # The panel used to run as root. It only needs to write its own state and
+  # spawn xray on ports >= 20000, so it runs as a dedicated unprivileged user.
+  local run_user="root"
+  if [[ "${EXITMESH_NO_USER:-0}" != "1" ]]; then
+    if ! id -u exitmesh >/dev/null 2>&1; then
+      useradd --system --no-create-home --home-dir "$STATE" \
+              --shell /usr/sbin/nologin exitmesh 2>/dev/null \
+        || useradd -r -M -d "$STATE" -s /sbin/nologin exitmesh 2>/dev/null || true
+    fi
+    if id -u exitmesh >/dev/null 2>&1; then
+      chown -R exitmesh:exitmesh "$STATE" "$CONF" 2>/dev/null || true
+      chmod 750 "$STATE" "$CONF" 2>/dev/null || true
+      run_user="exitmesh"
+      ok "running as unprivileged user 'exitmesh'"
+    else
+      warn "could not create the exitmesh user — the panel will run as root"
+    fi
+  fi
+
   cat > "/etc/systemd/system/$SVC_PANEL.service" <<EOF
 [Unit]
 Description=ExitMesh panel and SOCKS router
@@ -143,20 +185,42 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+User=$run_user
+Group=$run_user
 Environment=EXITMESH_DB=$STATE/exitmesh.db
 Environment=EXITMESH_XRAY=$XRAY_DIR/xray
 Environment=EXITMESH_LISTEN=$listen
 Environment=EXITMESH_PORT=$port
+Environment=EXITMESH_PASSWORD_FILE=$CONF/initial-password
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 $PREFIX/run-panel.py
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
+
+# Hardening: the panel needs the network, its own state dir, and the ability to
+# spawn the xray binary — nothing else. NoNewPrivileges makes any setuid helper
+# useless, ProtectSystem=strict makes the rest of the filesystem read-only, and
+# the syscall/address-family filters cut off whole classes of post-exploitation.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=full
-ReadWritePaths=$STATE $CONF /tmp
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+ReadWritePaths=$STATE $CONF
 
 [Install]
 WantedBy=multi-user.target
@@ -198,10 +262,19 @@ import secrets
 s.set_setting("session_secret", secrets.token_hex(32))
 print("  password set")
 PY
-  if [[ -t 0 ]] || [[ -n "${1:-}" ]]; then
+  # Only echo the password back to a human at an interactive terminal. When the
+  # installer runs unattended, printing it would drop the secret into CI logs,
+  # shell history or a provisioning transcript, so write it to a 0600 file and
+  # point at that instead.
+  if [[ -t 1 ]]; then
     printf '  %sadmin password: %s%s\n' "$C_OK" "$pw" "$C_OFF"
   else
-    printf '  %sadmin password: %s%s\n' "$C_OK" "$pw" "$C_OFF"
+    local pwfile="$CONF/initial-password"
+    umask 077
+    printf '%s\n' "$pw" > "$pwfile"
+    chmod 600 "$pwfile"
+    printf '  %sadmin password written to %s (mode 0600) — read it, then delete it%s\n' \
+      "$C_OK" "$pwfile" "$C_OFF"
   fi
 }
 
@@ -235,9 +308,21 @@ do_install() {
 
   step "done"
   local port="${PANEL_PORT:-8099}"
-  local ip; ip=$(curl -fsS -m 4 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+  local listen="${PANEL_LISTEN:-127.0.0.1}"
   say ""
-  say "  panel     http://$ip:$port"
+  # Print a URL that actually reaches the panel. Advertising
+  # http://<public-ip>:<port> was wrong twice over: the panel binds loopback by
+  # default, and that URL puts the admin password on the wire in cleartext.
+  if [[ "$listen" == "127.0.0.1" || "$listen" == "localhost" || "$listen" == "::1" ]]; then
+    say "  panel     http://127.0.0.1:$port  ${C_DIM}(loopback only)${C_OFF}"
+    say "            ${C_DIM}reach it over an SSH tunnel:${C_OFF}"
+    say "            ${C_DIM}ssh -N -L $port:127.0.0.1:$port root@<server>${C_OFF}"
+    say "            ${C_DIM}then open http://127.0.0.1:$port in your browser${C_OFF}"
+  else
+    say "  panel     http://$listen:$port"
+    warn "the panel is bound to a non-loopback address — put TLS in front of it"
+    say "            ${C_DIM}the admin password and session cookie are otherwise sent in cleartext${C_OFF}"
+  fi
   say "  router    127.0.0.1:10800  ${C_DIM}(socks5, loopback only)${C_OFF}"
   say "  cli       exitmesh list | add | probe | rules"
   say ""

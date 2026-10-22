@@ -2,9 +2,35 @@
 
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
+
+# An exit id becomes a filename (`<id>.json` under the xray config dir), so it
+# must never contain a path separator or a traversal sequence. Names are free
+# text from the panel, so the id is derived defensively: keep [a-z0-9-_.], fold
+# everything else to '-', and reject anything that still looks like a path.
+_ID_SAFE = re.compile(r"[^a-z0-9._-]+")
+
+
+def safe_exit_id(name, fallback="exit"):
+    """Derive a filesystem-safe id from a user-supplied exit name.
+
+    Without this, a name like `../../x` produced a config path outside the
+    config directory, and since the service runs as root that is arbitrary
+    file write. The id is also used as a URL path segment, so keep it to a
+    conservative charset.
+    """
+    raw = str(name or "").strip().lower()
+    slug = _ID_SAFE.sub("-", raw).strip("-._")
+    slug = slug.replace("..", "-")[:48].strip("-._")
+    if not slug:
+        slug = fallback
+    # Belt and braces: never hand back something with a separator or parent ref.
+    if "/" in slug or "\\" in slug or slug in (".", ".."):
+        slug = fallback
+    return slug
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS exits (
@@ -97,7 +123,7 @@ class Store:
         return dict(r) if r else None
 
     def add_exit(self, name, kind, endpoint="", link="", weight=100, note=""):
-        eid = name.lower().replace(" ", "-")[:48]
+        eid = safe_exit_id(name)
         with self._lock:
             self.db.execute(
                 "INSERT OR REPLACE INTO exits(id,name,kind,endpoint,link,weight,"

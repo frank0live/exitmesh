@@ -289,7 +289,9 @@ function fmtAgo(ts){
   if (d < 86400) return Math.floor(d/3600) + 'h ago';
   return Math.floor(d/86400) + 'd ago';
 }
-function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// Escape for both text and quoted-attribute contexts. Single quotes are escaped
+// too so the helper stays safe even if a future template uses '...' attributes.
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function loadAll(){
   try {
@@ -376,14 +378,13 @@ function render(d){
       '<td class="mono" style="font-size:11.5px">' + lat + '</td>' +
       '<td class="score">' + (e.score || (STATE.ranking.find(r=>r.id===e.id)||{}).score || '—') + '</td>' +
       '<td class="mono" style="font-size:11px;color:var(--dim)">↑' + fmtBytes(tr.up) + '<br>↓' + fmtBytes(tr.down) + '</td>' +
-      '<td><input type="number" value="' + (e.weight||100) + '" min="1" max="1000" style="width:62px;padding:4px 6px;font-size:11px" ' +
-        'onchange="setWeight(\'' + e.id + '\', this.value)"></td>' +
+      '<td><input type="number" class="w" data-eid="' + esc(e.id) + '" value="' + (e.weight||100) + '" min="1" max="1000" style="width:62px;padding:4px 6px;font-size:11px"></td>' +
       '<td><div class="acts">' +
-        '<button class="sm" onclick="probe(\'' + e.id + '\')" title="Probe">⚡</button>' +
-        '<button class="sm" onclick="act(\'' + e.id + '\',\'toggle\')" title="Toggle">' + (e.enabled?'⏸':'▶') + '</button>' +
+        '<button class="sm" data-act="probe" data-eid="' + esc(e.id) + '" title="Probe">⚡</button>' +
+        '<button class="sm" data-act="toggle" data-eid="' + esc(e.id) + '" title="Toggle">' + (e.enabled?'⏸':'▶') + '</button>' +
         (['vless','vmess','trojan','ss'].includes(e.kind) ?
-          '<button class="sm" onclick="act(\'' + e.id + '\',\'restart\')" title="Restart">↻</button>' : '') +
-        '<button class="sm danger" onclick="delExit(\'' + e.id + '\')" title="Delete">✕</button>' +
+          '<button class="sm" data-act="restart" data-eid="' + esc(e.id) + '" title="Restart">↻</button>' : '') +
+        '<button class="sm danger" data-act="delete" data-eid="' + esc(e.id) + '" title="Delete">✕</button>' +
       '</div></td></tr>';
   }).join('');
 }
@@ -438,9 +439,32 @@ async function probeAll(){
 }
 
 async function setWeight(id, w){
-  await api('/api/exits/' + id + '/weight', {method:'POST', body: JSON.stringify({weight: parseInt(w)})});
+  await api('/api/exits/' + encodeURIComponent(id) + '/weight', {method:'POST', body: JSON.stringify({weight: parseInt(w)})});
   loadAll();
 }
+
+// Row actions are wired through data attributes + one delegated listener rather
+// than inline onclick handlers: an exit id used to be concatenated into the
+// attribute, so a name containing a quote broke out of the string and ran
+// script. Ids now only ever reach the DOM through esc() and dataset.
+document.addEventListener('click', function(ev){
+  const btn = ev.target.closest('[data-act]');
+  if (!btn) return;
+  const id = btn.dataset.eid;
+  if (!id) return;
+  switch (btn.dataset.act){
+    case 'probe':   probe(id); break;
+    case 'toggle':  act(id, 'toggle'); break;
+    case 'restart': act(id, 'restart'); break;
+    case 'delete':  delExit(id); break;
+  }
+});
+
+document.addEventListener('change', function(ev){
+  const inp = ev.target.closest('input.w[data-eid]');
+  if (!inp) return;
+  setWeight(inp.dataset.eid, inp.value);
+});
 
 async function saveRules(){
   let rules;
