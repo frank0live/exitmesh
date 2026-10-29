@@ -260,6 +260,6 @@ bash install.sh uninstall
 Keeps `/var/lib/exitmesh` (your database) and `/etc/exitmesh` — delete them yourself for a
 clean slate.
 
-## License
+## Support
 
-MIT
+- 💬 Telegram: [@master_supports](https://t.me/master_supports)
