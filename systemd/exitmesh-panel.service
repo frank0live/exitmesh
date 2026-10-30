@@ -5,20 +5,45 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
+# Unprivileged on purpose: the panel only writes its own state and spawns xray
+# on ports >= 20000, so it has no reason to run as root. install.sh creates this
+# user; change it only if you know why you need to.
+User=exitmesh
+Group=exitmesh
 Environment=EXITMESH_DB=/var/lib/exitmesh/exitmesh.db
 Environment=EXITMESH_XRAY=/usr/local/bin/xray-bin/xray
 Environment=EXITMESH_LISTEN=127.0.0.1
 Environment=EXITMESH_PORT=8099
+Environment=EXITMESH_PASSWORD_FILE=/etc/exitmesh/initial-password
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 /opt/exitmesh/run-panel.py
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
+
+# Hardening: the panel needs the network, its own state dir, and the ability to
+# spawn the xray binary — nothing else. NoNewPrivileges makes any setuid helper
+# useless, ProtectSystem=strict makes the rest of the filesystem read-only, and
+# the syscall/address-family filters cut off whole classes of post-exploitation.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=full
-ReadWritePaths=/var/lib/exitmesh /etc/exitmesh /tmp
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/exitmesh /etc/exitmesh
 
 [Install]
 WantedBy=multi-user.target
