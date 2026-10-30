@@ -339,5 +339,26 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"  FAIL  {name}: {type(e).__name__}: {e}")
             fail += 1
+
+    # Also run the sibling security-regression module so this single documented
+    # command covers the whole suite. Its functions are loaded into a throwaway
+    # namespace rather than imported here, so pytest still collects each module
+    # exactly once.
+    import importlib.util, types
+    _sec = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_security.py")
+    _spec = importlib.util.spec_from_file_location("_exitmesh_security", _sec)
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    sec_fns = [(n, f) for n, f in sorted(vars(_mod).items())
+               if n.startswith("test_") and isinstance(f, types.FunctionType)]
+    for name, fn in sec_fns:
+        try:
+            fn()
+            print(f"  PASS  {name}")
+            ok += 1
+        except Exception as e:
+            print(f"  FAIL  {name}: {type(e).__name__}: {e}")
+            fail += 1
+
     print(f"\n{ok} passed, {fail} failed")
     sys.exit(1 if fail else 0)

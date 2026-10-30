@@ -11,14 +11,17 @@ A dead exit never wins; a degraded one only wins if nothing healthy is left.
 """
 
 import fnmatch
+import ipaddress
 import time
 
 
 class Breaker:
     """In-memory circuit breaker per exit, fed by probes and live traffic."""
 
-    def __init__(self, threshold=3):
+    def __init__(self, threshold=3, on_trip=None):
         self.threshold = threshold
+        self.on_trip = on_trip     # optional callback(eid, fails, backoff)
+        self._opened = {}          # eid -> ts of the last trip we reported
         self.state = {}   # eid -> {"fails": n, "until": ts, "latency": ms, "ok": bool}
 
     def record(self, eid, ok, latency=None):
@@ -29,12 +32,19 @@ class Breaker:
             s["until"] = 0
             if latency is not None:
                 s["latency"] = latency
+            self._opened.pop(eid, None)   # any success arms the next trip report
         else:
             s["fails"] += 1
             s["ok"] = False
             if s["fails"] >= self.threshold:
                 backoff = min(300, 15 * (2 ** (s["fails"] - self.threshold)))
                 s["until"] = time.time() + backoff
+                # Report the trip exactly once per opening, not once per
+                # failed probe, so the audit log stays readable.
+                if eid not in self._opened:
+                    self._opened[eid] = time.time()
+                    if self.on_trip:
+                        self.on_trip(eid, s["fails"], backoff)
 
     def get(self, eid):
         return self.state.get(eid, {"fails": 0, "until": 0, "latency": None, "ok": True})
@@ -51,6 +61,22 @@ class Breaker:
         if s["fails"] > 0:
             return 0.7
         return 1.0
+
+
+def _client_match(client_ip, pattern):
+    """Match a client address against a rule pattern.
+
+    Accepts a bare glob (``192.168.1.*``), a CIDR network (``10.0.0.0/8`` or
+    ``fd00::/8``) and an exact address.
+    """
+    if fnmatch.fnmatch(client_ip, pattern):
+        return True
+    if "/" in pattern:
+        try:
+            return ipaddress.ip_address(client_ip) in ipaddress.ip_network(pattern, strict=False)
+        except ValueError:
+            return False
+    return False
 
 
 class Selector:
@@ -98,7 +124,7 @@ class Selector:
                 return False
         if "client" in m:
             cip = peer[0] if isinstance(peer, tuple) else str(peer)
-            if not fnmatch.fnmatch(cip, str(m["client"])):
+            if not _client_match(cip, str(m["client"])):
                 return False
         return True
 

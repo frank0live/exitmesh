@@ -73,7 +73,8 @@ class App:
     def __init__(self, db_path, xray_bin="/usr/local/bin/xray",
                  web_root=None, listen="127.0.0.1"):
         self.store = Store(db_path)
-        self.breaker = Breaker(int(self.store.get_setting("unhealthy_after", "3")))
+        self.breaker = Breaker(int(self.store.get_setting("unhealthy_after", "3")),
+                               on_trip=self._log_breaker_trip)
         self.selector = Selector(
             self.store, self.breaker,
             timeout=float(self.store.get_setting("health_timeout", "6")),
@@ -140,6 +141,14 @@ class App:
             rec[0] += 1
 
     # ---------------------------------------------------------------- probes
+    def _log_breaker_trip(self, eid, fails, backoff):
+        """Callback from Breaker: record a trip in the audit table."""
+        try:
+            self.store.log("system", "breaker-open",
+                           f"{eid} after {fails} failures (backoff {int(backoff)}s)")
+        except Exception:
+            pass
+
     def probe_one(self, eid):
         e = self.store.get_exit(eid)
         if not e:
